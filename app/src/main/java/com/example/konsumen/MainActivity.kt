@@ -1,168 +1,137 @@
 package com.example.konsumen
-
+import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.unit.dp
-import com.example.konsumen.ui.theme.KonsumenTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import android.text.InputType
+import android.view.WindowInsets
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
-
-private data class Konsumen(
-    val id: Long,
-    val nama: String,
-    val email: String,
-    val telepon: String,
-    val alamat: String
-)
-
-class MainActivity : ComponentActivity() {
+import kotlin.concurrent.thread
+class MainActivity : Activity() {
+    private lateinit var panel: LinearLayout
+    private lateinit var daftar: LinearLayout
+    private lateinit var status: TextView
+    private lateinit var simpan: Button
+    private lateinit var hapus: Button
+    private val kolom = listOf("nama", "email", "telepon", "alamat")
+    private lateinit var input: List<EditText>
+    private var idPilihan: Long? = null
+    private var sibuk = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            KonsumenTheme {
-                KonsumenScreen()
+        val scroll = ScrollView(this)
+        panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val margin = (16 * resources.displayMetrics.density).toInt()
+        scroll.setOnApplyWindowInsetsListener { _, insets ->
+            val tepi = insets.getInsets(WindowInsets.Type.systemBars())
+            panel.setPadding(margin + tepi.left, margin + tepi.top,
+                margin + tepi.right, margin + tepi.bottom)
+            insets
+        }
+        scroll.addView(panel)
+        setContentView(scroll)
+        tampilTeks("Data Konsumen", 24f)
+        input = kolom.map { field ->
+            EditText(this).apply {
+                hint = field.replaceFirstChar { it.uppercase() }
+                contentDescription = hint
+                setSingleLine()
+                inputType = when (field) {
+                    "email" -> InputType.TYPE_CLASS_TEXT or
+                            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+                    "telepon" -> InputType.TYPE_CLASS_PHONE
+                    else -> InputType.TYPE_CLASS_TEXT
+                }
+                panel.addView(this)
             }
         }
+        aturTombolDanDaftar()
     }
-}
-
-@Composable
-private fun KonsumenScreen() {
-    var nama by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var telepon by remember { mutableStateOf("") }
-    var alamat by remember { mutableStateOf("") }
-    var fieldError by remember { mutableStateOf<String?>(null) }
-    var idPilihan by remember { mutableStateOf<Long?>(null) }
-    var daftar by remember { mutableStateOf<List<Konsumen>>(emptyList()) }
-    var status by remember { mutableStateOf("") }
-    var sibuk by remember { mutableStateOf(false) }
-    var tampilDialogHapus by remember { mutableStateOf(false) }
-
-    val scrollState = rememberScrollState()
-    val scope = rememberCoroutineScope()
-    val fokusNama = remember { FocusRequester() }
-    val fokusEmail = remember { FocusRequester() }
-    val fokusTelepon = remember { FocusRequester() }
-    val fokusAlamat = remember { FocusRequester() }
-
-    fun kosongkan() {
+    private fun tampilTeks(teks: String, ukuran: Float): TextView =
+        TextView(this).apply {
+            text = teks
+            textSize = ukuran
+            panel.addView(this)
+        }
+    private fun tombol(teks: String, aksi: () -> Unit): Button =
+        Button(this).apply {
+            text = teks
+            setOnClickListener { if (!sibuk) aksi() }
+            panel.addView(this)
+        }
+    private fun aturTombolDanDaftar() {
+        simpan = tombol("Tambah konsumen") { simpanData() }
+        tombol("Kosongkan formulir") { kosongkan() }
+        hapus = tombol("Hapus konsumen terpilih") { konfirmasiHapus() }
+        hapus.isEnabled = false
+        tombol("Muat ulang daftar") { muat() }
+        status = tampilTeks("", 15f)
+        tampilTeks("Daftar Konsumen", 20f)
+        daftar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            panel.addView(this)
+        }
+        muat()
+    }
+    private fun kosongkan() {
         idPilihan = null
-        nama = ""
-        email = ""
-        telepon = ""
-        alamat = ""
-        fieldError = null
+        input.forEach { it.text.clear() }
+        simpan.text = "Tambah konsumen"
+        hapus.isEnabled = false
     }
-
-    fun pilih(item: Konsumen) {
-        idPilihan = item.id
-        nama = item.nama
-        email = item.email
-        telepon = item.telepon
-        alamat = item.alamat
-        fieldError = null
-        status = "Mengedit konsumen #${item.id}"
-        scope.launch { scrollState.animateScrollTo(0) }
+    private fun pilih(baris: JSONObject) {
+        idPilihan = baris.getLong("id")
+        input.zip(kolom).forEach { (edit, nama) ->
+            edit.setText(baris.getString(nama))
+        }
+        simpan.text = "Simpan perubahan"
+        hapus.isEnabled = true
+        status.text = "Mengedit konsumen #$idPilihan"
+        (panel.parent as ScrollView).smoothScrollTo(0, 0)
     }
-
-    fun <T> jalankan(kerja: () -> T, sukses: (T) -> Unit) {
-        if (sibuk) return
-        sibuk = true
-        status = "Menghubungi server…"
-        scope.launch {
-            val hasil = withContext(Dispatchers.IO) { runCatching(kerja) }
-            sibuk = false
-            hasil.fold(
-                onSuccess = sukses,
-                onFailure = { status = it.message ?: "Permintaan gagal." }
-            )
+    private fun gambarDaftar(data: JSONArray) {
+        daftar.removeAllViews()
+        if (data.length() == 0) {
+            daftar.addView(TextView(this).apply {
+                text = "Belum ada konsumen."
+            })
+        }
+        for (i in 0 until data.length()) {
+            val baris = data.getJSONObject(i)
+            daftar.addView(Button(this).apply {
+                isAllCaps = false
+                text = "#${baris.getLong("id")} · " +
+                        baris.getString("nama") + "\n" +
+                        baris.getString("email")
+                setOnClickListener { if (!sibuk) pilih(baris) }
+            })
         }
     }
-
-    fun muat(pesan: String = "") {
+    private fun muat(pesan: String = "") {
         jalankan(
-            kerja = { parseDaftar(KonsumenApi.request("GET").getJSONArray("data")) }
+            kerja = { KonsumenApi.request("GET").getJSONArray("data") }
         ) { data ->
-            daftar = data
-            status = "$pesan${data.size} konsumen."
+            gambarDaftar(data)
+            status.text = pesan + "${data.length()} konsumen."
         }
     }
-
-    fun simpanData() {
-        val nilaiNama = nama.trim()
-        val nilaiEmail = email.trim()
-        val nilaiTelepon = telepon.trim()
-        val nilaiAlamat = alamat.trim()
-
-        when {
-            nilaiNama.isBlank() -> {
-                fieldError = "nama"
-                fokusNama.requestFocus()
-                return
-            }
-            nilaiEmail.isBlank() -> {
-                fieldError = "email"
-                fokusEmail.requestFocus()
-                return
-            }
-            nilaiTelepon.isBlank() -> {
-                fieldError = "telepon"
-                fokusTelepon.requestFocus()
-                return
-            }
-            nilaiAlamat.isBlank() -> {
-                fieldError = "alamat"
-                fokusAlamat.requestFocus()
-                return
-            }
+    private fun simpanData() {
+        val nilai = input.map { it.text.toString().trim() }
+        val kosong = nilai.indexOfFirst { it.isBlank() }
+        if (kosong >= 0) {
+            input[kosong].error = "Wajib diisi"
+            input[kosong].requestFocus()
+            return
         }
-
-        fieldError = null
-        val body = JSONObject().apply {
-            put("nama", nilaiNama)
-            put("email", nilaiEmail)
-            put("telepon", nilaiTelepon)
-            put("alamat", nilaiAlamat)
-        }
+        val body = JSONObject()
+        kolom.zip(nilai).forEach { (nama, isi) -> body.put(nama, isi) }
         val id = idPilihan
         val method = if (id == null) "POST" else "PUT"
         jalankan(kerja = { KonsumenApi.request(method, id, body) }) {
@@ -170,244 +139,34 @@ private fun KonsumenScreen() {
             muat("Data tersimpan. ")
         }
     }
-
-    fun hapusData(id: Long) {
-        jalankan(kerja = { KonsumenApi.request("DELETE", id) }) {
-            kosongkan()
-            muat("Data dihapus. ")
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        muat()
-    }
-
-    if (tampilDialogHapus && idPilihan != null) {
-        val id = idPilihan!!
-        AlertDialog(
-            onDismissRequest = { tampilDialogHapus = false },
-            title = { Text("Hapus konsumen #$id?") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        tampilDialogHapus = false
-                        hapusData(id)
-                    }
-                ) {
-                    Text("Hapus")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { tampilDialogHapus = false }) {
-                    Text("Batal")
+    private fun konfirmasiHapus() {
+        val id = idPilihan ?: return
+        AlertDialog.Builder(this)
+            .setTitle("Hapus konsumen #$id?")
+            .setNegativeButton("Batal", null)
+            .setPositiveButton("Hapus") { _, _ ->
+                jalankan(kerja = { KonsumenApi.request("DELETE", id) }) {
+                    kosongkan()
+                    muat("Data dihapus. ")
                 }
             }
-        )
+            .show()
     }
-
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .imePadding()
-                .verticalScroll(scrollState)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = "Data Konsumen",
-                style = MaterialTheme.typography.headlineMedium
-            )
-
-            OutlinedTextField(
-                value = nama,
-                onValueChange = {
-                    nama = it
-                    if (fieldError == "nama") fieldError = null
-                },
-                label = { Text("Nama") },
-                singleLine = true,
-                enabled = !sibuk,
-                isError = fieldError == "nama",
-                supportingText = if (fieldError == "nama") {
-                    { Text("Wajib diisi") }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
-                    imeAction = ImeAction.Next
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(fokusNama)
-            )
-
-            OutlinedTextField(
-                value = email,
-                onValueChange = {
-                    email = it
-                    if (fieldError == "email") fieldError = null
-                },
-                label = { Text("Email") },
-                singleLine = true,
-                enabled = !sibuk,
-                isError = fieldError == "email",
-                supportingText = if (fieldError == "email") {
-                    { Text("Wajib diisi") }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Email,
-                    imeAction = ImeAction.Next
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(fokusEmail)
-            )
-
-            OutlinedTextField(
-                value = telepon,
-                onValueChange = {
-                    telepon = it
-                    if (fieldError == "telepon") fieldError = null
-                },
-                label = { Text("Telepon") },
-                singleLine = true,
-                enabled = !sibuk,
-                isError = fieldError == "telepon",
-                supportingText = if (fieldError == "telepon") {
-                    { Text("Wajib diisi") }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Phone,
-                    imeAction = ImeAction.Next
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(fokusTelepon)
-            )
-
-            OutlinedTextField(
-                value = alamat,
-                onValueChange = {
-                    alamat = it
-                    if (fieldError == "alamat") fieldError = null
-                },
-                label = { Text("Alamat") },
-                singleLine = true,
-                enabled = !sibuk,
-                isError = fieldError == "alamat",
-                supportingText = if (fieldError == "alamat") {
-                    { Text("Wajib diisi") }
-                } else {
-                    null
-                },
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Text,
-                    imeAction = ImeAction.Done
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(fokusAlamat)
-            )
-
-            Button(
-                onClick = { simpanData() },
-                enabled = !sibuk,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(if (idPilihan == null) "Tambah konsumen" else "Simpan perubahan")
-            }
-
-            OutlinedButton(
-                onClick = { kosongkan() },
-                enabled = !sibuk,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Kosongkan formulir")
-            }
-
-            OutlinedButton(
-                onClick = { tampilDialogHapus = true },
-                enabled = !sibuk && idPilihan != null,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Hapus konsumen terpilih")
-            }
-
-            OutlinedButton(
-                onClick = { muat() },
-                enabled = !sibuk,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Muat ulang daftar")
-            }
-
-            if (sibuk) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
-
-            if (status.isNotEmpty()) {
-                Text(
-                    text = status,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-
-            Text(
-                text = "Daftar Konsumen",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(top = 8.dp)
-            )
-
-            if (daftar.isEmpty() && !sibuk) {
-                Text(
-                    text = "Belum ada konsumen.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                daftar.forEach { item ->
-                    OutlinedCard(
-                        onClick = { if (!sibuk) pilih(item) },
-                        enabled = !sibuk,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Text(
-                                text = "#${item.id} · ${item.nama}",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = item.email,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                        }
-                    }
+    private fun <T> jalankan(kerja: () -> T, sukses: (T) -> Unit) {
+        if (sibuk) return
+        sibuk = true
+        input.forEach { it.isEnabled = false }
+        status.text = "Menghubungi server…"
+        thread {
+            val hasil = runCatching(kerja)
+            runOnUiThread {
+                if (isDestroyed || isFinishing) return@runOnUiThread
+                sibuk = false
+                input.forEach { it.isEnabled = true }
+                hasil.fold(sukses) {
+                    status.text = it.message ?: "Permintaan gagal."
                 }
             }
         }
     }
 }
-
-private fun parseDaftar(data: JSONArray): List<Konsumen> =
-    List(data.length()) { index ->
-        val baris = data.getJSONObject(index)
-        Konsumen(
-            id = baris.getLong("id"),
-            nama = baris.getString("nama"),
-            email = baris.getString("email"),
-            telepon = baris.getString("telepon"),
-            alamat = baris.getString("alamat")
-        )
-    }
